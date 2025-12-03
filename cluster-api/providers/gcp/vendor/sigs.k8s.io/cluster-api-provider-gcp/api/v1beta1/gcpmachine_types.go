@@ -410,6 +410,32 @@ type MetadataItem struct {
 	Value *string `json:"value,omitempty"`
 }
 
+// PhysicalHostTopology represents the physical host topology of the host
+// on which the VM is running. This information is useful for workloads
+// that require low-latency communication between VMs (e.g., GPU workloads).
+type PhysicalHostTopology struct {
+	// Cluster is the global name of the Compute Engine cluster where
+	// the running instance is located.
+	// +optional
+	Cluster string `json:"cluster,omitempty"`
+
+	// Block is the ID of the block in which the running instance is located.
+	// Instances within the same block experience low network latency.
+	// +optional
+	Block string `json:"block,omitempty"`
+
+	// SubBlock is the ID of the sub-block in which the running instance is located.
+	// Instances in the same sub-block experience lower network latency than
+	// instances in the same block.
+	// +optional
+	SubBlock string `json:"subBlock,omitempty"`
+
+	// Host is the ID of the host on which the running instance is located.
+	// Instances on the same host experience the lowest possible network latency.
+	// +optional
+	Host string `json:"host,omitempty"`
+}
+
 // GCPMachineStatus defines the observed state of GCPMachine.
 type GCPMachineStatus struct {
 	// Ready is true when the provider resource is ready.
@@ -460,6 +486,12 @@ type GCPMachineStatus struct {
 	// controller's output.
 	// +optional
 	FailureMessage *string `json:"failureMessage,omitempty"`
+
+	// PhysicalHostTopology contains the physical host topology information
+	// for the GCP instance. This is useful for GPU workloads that require
+	// low-latency communication between VMs in the same block/subblock/host.
+	// +optional
+	PhysicalHostTopology *PhysicalHostTopology `json:"physicalHostTopology,omitempty"`
 }
 
 // +kubebuilder:object:root=true

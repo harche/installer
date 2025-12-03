@@ -240,6 +240,14 @@ func (r *GCPMachineReconciler) reconcile(ctx context.Context, machineScope *scop
 		log.Info("GCPMachine instance is running", "instance-id", *machineScope.GetInstanceID())
 		record.Eventf(machineScope.GCPMachine, "GCPMachineReconcile", "GCPMachine instance is running - instance-id: %s", *machineScope.GetInstanceID())
 		record.Event(machineScope.GCPMachine, "GCPMachineReconcile", "Reconciled")
+
+		// Propagate physical host topology labels to the CAPI Machine
+		// These labels will be synced to the Node by the CAPI Machine controller
+		if err := r.reconcileTopologyLabels(ctx, machineScope); err != nil {
+			log.Error(err, "Error reconciling topology labels on Machine")
+			// Non-fatal error, continue with reconciliation
+		}
+
 		machineScope.SetReady()
 		return ctrl.Result{}, nil
 	default:
@@ -247,6 +255,68 @@ func (r *GCPMachineReconciler) reconcile(ctx context.Context, machineScope *scop
 		machineScope.SetFailureMessage(errors.Errorf("GCPMachine instance state %s is unexpected", instanceState))
 		return ctrl.Result{RequeueAfter: reconciler.DefaultRetryTime}, nil
 	}
+}
+
+// reconcileTopologyLabels adds physical host topology labels to the CAPI Machine.
+// These labels use the node.cluster.x-k8s.io domain which CAPI will propagate to the Node.
+func (r *GCPMachineReconciler) reconcileTopologyLabels(ctx context.Context, machineScope *scope.MachineScope) error {
+	log := log.FromContext(ctx)
+	topology := machineScope.GCPMachine.Status.PhysicalHostTopology
+	if topology == nil {
+		return nil
+	}
+
+	machine := machineScope.Machine
+	if machine.Labels == nil {
+		machine.Labels = make(map[string]string)
+	}
+
+	// Use the node.cluster.x-k8s.io domain which is managed by CAPI and propagated to Nodes
+	// See: https://cluster-api.sigs.k8s.io/developer/architecture/controllers/machine#node-labels-sync
+	labelsChanged := false
+
+	if topology.Cluster != "" {
+		labelKey := "node.cluster.x-k8s.io/gcp-topology-cluster"
+		if machine.Labels[labelKey] != topology.Cluster {
+			machine.Labels[labelKey] = topology.Cluster
+			labelsChanged = true
+		}
+	}
+	if topology.Block != "" {
+		labelKey := "node.cluster.x-k8s.io/gcp-topology-block"
+		if machine.Labels[labelKey] != topology.Block {
+			machine.Labels[labelKey] = topology.Block
+			labelsChanged = true
+		}
+	}
+	if topology.SubBlock != "" {
+		labelKey := "node.cluster.x-k8s.io/gcp-topology-sub-block"
+		if machine.Labels[labelKey] != topology.SubBlock {
+			machine.Labels[labelKey] = topology.SubBlock
+			labelsChanged = true
+		}
+	}
+	if topology.Host != "" {
+		labelKey := "node.cluster.x-k8s.io/gcp-topology-host"
+		if machine.Labels[labelKey] != topology.Host {
+			machine.Labels[labelKey] = topology.Host
+			labelsChanged = true
+		}
+	}
+
+	if labelsChanged {
+		log.Info("Updating Machine with physical host topology labels",
+			"cluster", topology.Cluster,
+			"block", topology.Block,
+			"subBlock", topology.SubBlock,
+			"host", topology.Host)
+
+		if err := r.Client.Update(ctx, machine); err != nil {
+			return errors.Wrap(err, "failed to update Machine with topology labels")
+		}
+	}
+
+	return nil
 }
 
 func (r *GCPMachineReconciler) reconcileDelete(ctx context.Context, machineScope *scope.MachineScope) error {

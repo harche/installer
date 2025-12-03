@@ -222,6 +222,13 @@ func (m *MachineScope) SetAddresses(addressList []corev1.NodeAddress) {
 	m.GCPMachine.Status.Addresses = addressList
 }
 
+// SetPhysicalHostTopology sets the physical host topology information on the GCPMachine.
+// This includes cluster, block, subblock, and host information useful for
+// workloads requiring low-latency communication (e.g., GPU workloads).
+func (m *MachineScope) SetPhysicalHostTopology(topology *infrav1.PhysicalHostTopology) {
+	m.GCPMachine.Status.PhysicalHostTopology = topology
+}
+
 // ANCHOR_END: MachineSetter
 
 // ANCHOR: MachineInstanceSpec

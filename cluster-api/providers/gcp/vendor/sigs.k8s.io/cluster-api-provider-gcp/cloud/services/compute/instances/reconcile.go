@@ -88,6 +88,36 @@ func (s *Service) Reconcile(ctx context.Context) error {
 	s.scope.SetAddresses(addresses)
 	s.scope.SetInstanceStatus(infrav1.InstanceStatus(instance.Status))
 
+	// Set physical host topology if available (useful for GPU workloads)
+	if instance.ResourceStatus != nil && instance.ResourceStatus.PhysicalHostTopology != nil {
+		topology := &infrav1.PhysicalHostTopology{
+			Cluster:  instance.ResourceStatus.PhysicalHostTopology.Cluster,
+			Block:    instance.ResourceStatus.PhysicalHostTopology.Block,
+			SubBlock: instance.ResourceStatus.PhysicalHostTopology.Subblock,
+			Host:     instance.ResourceStatus.PhysicalHostTopology.Host,
+		}
+		s.scope.SetPhysicalHostTopology(topology)
+		log.V(2).Info("Set physical host topology",
+			"cluster", topology.Cluster,
+			"block", topology.Block,
+			"subBlock", topology.SubBlock,
+			"host", topology.Host)
+
+		// Also set annotations for easy consumption by other components
+		if topology.Cluster != "" {
+			s.scope.SetAnnotation("topology.gcp.infrastructure.cluster.x-k8s.io/cluster", topology.Cluster)
+		}
+		if topology.Block != "" {
+			s.scope.SetAnnotation("topology.gcp.infrastructure.cluster.x-k8s.io/block", topology.Block)
+		}
+		if topology.SubBlock != "" {
+			s.scope.SetAnnotation("topology.gcp.infrastructure.cluster.x-k8s.io/sub-block", topology.SubBlock)
+		}
+		if topology.Host != "" {
+			s.scope.SetAnnotation("topology.gcp.infrastructure.cluster.x-k8s.io/host", topology.Host)
+		}
+	}
+
 	if s.scope.IsControlPlane() {
 		if err := s.registerControlPlaneInstance(ctx, instance); err != nil {
 			return err

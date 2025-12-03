@@ -102,6 +102,7 @@ type MachineSetter interface {
 	SetFailureReason(v string)
 	SetAnnotation(key, value string)
 	SetAddresses(addressList []corev1.NodeAddress)
+	SetPhysicalHostTopology(topology *infrav1.PhysicalHostTopology)
 }
 
 // Machine is an interface which can get and set machine information.
