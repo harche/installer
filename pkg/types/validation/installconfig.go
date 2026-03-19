@@ -279,6 +279,7 @@ func ValidateInstallConfig(c *types.InstallConfig, usingAgentMethod bool) field.
 		}
 	}
 
+	allErrs = append(allErrs, validateImageVerificationPolicy(c)...)
 	allErrs = append(allErrs, ValidateFeatureSet(c)...)
 	allErrs = append(allErrs, validateOSImageStream(c)...)
 
@@ -1886,6 +1887,21 @@ func validateMirrorCredentials(mirrors []string, pullSecret string) field.ErrorL
 // extractRegistryHost extracts the registry host (with port if any) from a repository string.
 // For example: "registry.example.com:5000/namespace/repo" -> "registry.example.com:5000".
 // Returns an error if the repository string cannot be parsed as either a named reference or a host.
+func validateImageVerificationPolicy(c *types.InstallConfig) field.ErrorList {
+	allErrs := field.ErrorList{}
+	switch c.ImageVerificationPolicy {
+	case types.ImageVerificationPolicyDefault, types.ImageVerificationPolicyEnabled, types.ImageVerificationPolicyDisabled:
+		// valid
+	default:
+		allErrs = append(allErrs, field.NotSupported(
+			field.NewPath("imageVerificationPolicy"),
+			c.ImageVerificationPolicy,
+			[]string{string(types.ImageVerificationPolicyEnabled), string(types.ImageVerificationPolicyDisabled)},
+		))
+	}
+	return allErrs
+}
+
 func extractRegistryHost(repository string) (string, error) {
 	ref, err := dockerref.ParseNamed(repository)
 	if err != nil {

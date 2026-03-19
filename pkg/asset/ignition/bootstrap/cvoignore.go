@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"strconv"
 
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
@@ -14,7 +15,15 @@ import (
 
 	configv1 "github.com/openshift/api/config/v1"
 	"github.com/openshift/installer/pkg/asset"
+	"github.com/openshift/installer/pkg/asset/installconfig"
 	"github.com/openshift/installer/pkg/asset/manifests"
+	"github.com/openshift/installer/pkg/types"
+)
+
+const (
+	// envDisableImagePolicy is the experimental env var for disabling sigstore image verification.
+	// Deprecated: use imageVerificationPolicy in install-config.yaml instead.
+	envDisableImagePolicy = "OPENSHIFT_INSTALL_EXPERIMENTAL_DISABLE_IMAGE_POLICY"
 )
 
 var (
@@ -37,6 +46,7 @@ func (a *CVOIgnore) Name() string {
 // Dependencies returns all of the dependencies directly needed by the CVOIgnore asset
 func (a *CVOIgnore) Dependencies() []asset.Asset {
 	return []asset.Asset{
+		&installconfig.InstallConfig{},
 		&manifests.Manifests{},
 		&manifests.Openshift{},
 	}
@@ -44,9 +54,10 @@ func (a *CVOIgnore) Dependencies() []asset.Asset {
 
 // Generate generates the respective operator config.yml files
 func (a *CVOIgnore) Generate(_ context.Context, dependencies asset.Parents) error {
+	installConfig := &installconfig.InstallConfig{}
 	operators := &manifests.Manifests{}
 	openshiftManifests := &manifests.Openshift{}
-	dependencies.Get(operators, openshiftManifests)
+	dependencies.Get(installConfig, operators, openshiftManifests)
 
 	var clusterVersion *unstructured.Unstructured
 	var ignoredResources []interface{}
@@ -99,7 +110,7 @@ func (a *CVOIgnore) Generate(_ context.Context, dependencies asset.Parents) erro
 	if !ok && originalOverridesAsInterface != nil {
 		return errors.Errorf("unexpected type (%T) for .spec.overrides in clusterversion", originalOverridesAsInterface)
 	}
-	originalOverrides = append(originalOverrides, getClusterVersionOperatorOverrides()...)
+	originalOverrides = append(originalOverrides, getClusterVersionOperatorOverrides(installConfig.Config)...)
 
 	originalOverridesPatch := map[string]interface{}{
 		"spec": map[string]interface{}{
@@ -141,14 +152,11 @@ func (a *CVOIgnore) Load(f asset.FileFetcher) (bool, error) {
 
 // getClusterVersionOperatorOverrides returns Cluster Version Operator (CVO) overrides if any.
 // The CVO overrides allow disabling CVO management of specified resources.
-func getClusterVersionOperatorOverrides() []interface{} {
+func getClusterVersionOperatorOverrides(ic *types.InstallConfig) []interface{} {
 	var overrides []interface{}
 
-	// OPENSHIFT_INSTALL_EXPERIMENTAL_DISABLE_IMAGE_POLICY, if set non-empty, will instruct the installer
-	// to include an entry for the cluster-scoped "openshift" ClusterImagePolicy in the CVO overrides.
-	// This enables internal testing to opt out of the sigstore signing requirement for release images.
-	if disableImagePolicy, ok := os.LookupEnv("OPENSHIFT_INSTALL_EXPERIMENTAL_DISABLE_IMAGE_POLICY"); ok && disableImagePolicy != "" {
-		logrus.Warn("OPENSHIFT_INSTALL_EXPERIMENTAL_DISABLE_IMAGE_POLICY is set, opting out of the sigstore signing requirement for release images")
+	if shouldDisableImagePolicy(ic) {
+		logrus.Warn("Opting out of the sigstore signing requirement for release images")
 		overrides = append(overrides, configv1.ComponentOverride{
 			Group:     configv1.GroupVersion.Group,
 			Kind:      "ClusterImagePolicy",
@@ -158,4 +166,29 @@ func getClusterVersionOperatorOverrides() []interface{} {
 	}
 
 	return overrides
+}
+
+// shouldDisableImagePolicy returns true if sigstore image verification should be disabled.
+// It checks the InstallConfig field first, then falls back to the experimental env var
+// for backward compatibility with internal testing workflows.
+func shouldDisableImagePolicy(ic *types.InstallConfig) bool {
+	// Check the install-config field first.
+	if ic != nil && ic.ImageVerificationDisabled() {
+		logrus.Info("imageVerificationPolicy is set to Disabled in install-config.yaml")
+		return true
+	}
+
+	// Fall back to the experimental env var for backward compatibility.
+	val, ok := os.LookupEnv(envDisableImagePolicy)
+	if !ok {
+		return false
+	}
+	parsed, err := strconv.ParseBool(val)
+	if err != nil {
+		return false
+	}
+	if parsed {
+		logrus.Warn(envDisableImagePolicy + " is set to true (deprecated: use imageVerificationPolicy in install-config.yaml instead)")
+	}
+	return parsed
 }

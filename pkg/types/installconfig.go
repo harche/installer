@@ -231,6 +231,17 @@ type InstallConfig struct {
 	// OSImageStream is the global OS Image Stream to be used for all machines in the cluster.
 	// +optional
 	OSImageStream OSImageStream `json:"osImageStream,omitempty"`
+
+	// ImageVerificationPolicy controls whether the default ClusterImagePolicy for
+	// sigstore image verification is created during installation. By default, OCP 4.22+
+	// creates a ClusterImagePolicy that enforces Red Hat signing key verification of all
+	// OpenShift core component images. Setting this to "Disabled" prevents that policy
+	// from being created, which is necessary for disconnected/restricted-network environments
+	// where sigstore signatures have not yet been mirrored.
+	//
+	// +kubebuilder:validation:Enum="";Enabled;Disabled
+	// +optional
+	ImageVerificationPolicy ImageVerificationPolicy `json:"imageVerificationPolicy,omitempty"`
 }
 
 // ClusterDomain returns the DNS domain that all records for a cluster must belong to.
@@ -637,6 +648,12 @@ func (c *InstallConfig) Enabled(key configv1.FeatureGateName) bool {
 	return c.EnabledFeatureGates().Enabled(key)
 }
 
+// ImageVerificationDisabled returns true if the user has explicitly disabled
+// sigstore image verification via the install config.
+func (c *InstallConfig) ImageVerificationDisabled() bool {
+	return c.ImageVerificationPolicy == ImageVerificationPolicyDisabled
+}
+
 // PublicAPI indicates whether the API load balancer should be public
 // by inspecting the cluster and operator publishing strategies.
 func (c *InstallConfig) PublicAPI() bool {
@@ -674,4 +691,18 @@ const (
 	OSImageStreamRHCOS9 OSImageStream = "rhel-9"
 	// OSImageStreamRHCOS10 represents the RHEL 10 OS Image Stream.
 	OSImageStreamRHCOS10 OSImageStream = "rhel-10"
+)
+
+// ImageVerificationPolicy controls sigstore image verification at install time.
+// +kubebuilder:validation:Enum="";Enabled;Disabled
+type ImageVerificationPolicy string
+
+const (
+	// ImageVerificationPolicyDefault means the default behavior applies (verification enabled).
+	ImageVerificationPolicyDefault ImageVerificationPolicy = ""
+	// ImageVerificationPolicyEnabled explicitly enables the default ClusterImagePolicy.
+	ImageVerificationPolicyEnabled ImageVerificationPolicy = "Enabled"
+	// ImageVerificationPolicyDisabled disables the default ClusterImagePolicy, allowing
+	// installation in environments where sigstore signatures are not available.
+	ImageVerificationPolicyDisabled ImageVerificationPolicy = "Disabled"
 )

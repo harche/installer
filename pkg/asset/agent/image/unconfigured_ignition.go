@@ -15,6 +15,7 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"github.com/openshift/installer/pkg/asset"
+	agentcommon "github.com/openshift/installer/pkg/asset/agent"
 	"github.com/openshift/installer/pkg/asset/agent/agentconfig"
 	"github.com/openshift/installer/pkg/asset/agent/common"
 	"github.com/openshift/installer/pkg/asset/agent/manifests"
@@ -78,6 +79,7 @@ func (a *UnconfiguredIgnition) Name() string {
 func (a *UnconfiguredIgnition) Dependencies() []asset.Asset {
 	return []asset.Asset{
 		&workflow.AgentWorkflow{},
+		&agentcommon.OptionalInstallConfig{},
 		&agentconfig.AgentConfig{},
 		&manifests.InfraEnvFile{},
 		&manifests.AgentPullSecret{},
@@ -92,13 +94,14 @@ func (a *UnconfiguredIgnition) Dependencies() []asset.Asset {
 // system ignition for the bootstrap phase. After first reboot, MCO manages these.
 func (a *UnconfiguredIgnition) Generate(ctx context.Context, dependencies asset.Parents) error {
 	agentWorkflow := &workflow.AgentWorkflow{}
+	optionalInstallConfig := &agentcommon.OptionalInstallConfig{}
 	infraEnvAsset := &manifests.InfraEnvFile{}
 	infraEnvIDAsset := &common.InfraEnvID{}
 	clusterImageSetAsset := &manifests.ClusterImageSet{}
 	pullSecretAsset := &manifests.AgentPullSecret{}
 	nmStateConfigs := &manifests.NMStateConfig{}
 	agentConfig := &agentconfig.AgentConfig{}
-	dependencies.Get(agentWorkflow, infraEnvAsset, clusterImageSetAsset, pullSecretAsset, nmStateConfigs, infraEnvIDAsset, agentConfig)
+	dependencies.Get(agentWorkflow, optionalInstallConfig, infraEnvAsset, clusterImageSetAsset, pullSecretAsset, nmStateConfigs, infraEnvIDAsset, agentConfig)
 
 	if agentWorkflow.Workflow != workflow.AgentWorkflowTypeInstall {
 		return fmt.Errorf("AgentWorkflowType value not supported: %s", agentWorkflow.Workflow)
@@ -161,7 +164,7 @@ func (a *UnconfiguredIgnition) Generate(ctx context.Context, dependencies asset.
 		OSImage:                   osImage,
 		Proxy:                     infraEnv.Spec.Proxy,
 		AuthType:                  "none",
-		DisableImagePolicy:        shouldDisableImagePolicy(),
+		DisableImagePolicy:        shouldDisableImagePolicy(optionalInstallConfig.Config),
 	}
 
 	enabledServices := getDefaultEnabledServices()

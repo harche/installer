@@ -43,6 +43,10 @@ import (
 	"github.com/openshift/installer/pkg/version"
 )
 
+// envDisableImagePolicy is the experimental env var for disabling sigstore image verification.
+// Deprecated: use imageVerificationPolicy in install-config.yaml instead.
+const envDisableImagePolicy = "OPENSHIFT_INSTALL_EXPERIMENTAL_DISABLE_IMAGE_POLICY"
+
 const addNodesEnvPath = "/etc/assisted/add-nodes.env"
 const rendezvousHostEnvPath = "/etc/assisted/rendezvous-host.env"
 const manifestPath = "/etc/assisted/manifests"
@@ -102,6 +106,7 @@ func (a *Ignition) Dependencies() []asset.Asset {
 		&joiner.ClusterInfo{},
 		&joiner.AddNodesConfig{},
 		&joiner.ImportClusterConfig{},
+		&agentcommon.OptionalInstallConfig{},
 		&manifests.AgentManifests{},
 		&manifests.ExtraManifests{},
 		&agentconfig.FencingCredentials{},
@@ -122,6 +127,7 @@ func (a *Ignition) Dependencies() []asset.Asset {
 // Generate generates the agent installer ignition.
 func (a *Ignition) Generate(ctx context.Context, dependencies asset.Parents) error {
 	agentWorkflow := &workflow.AgentWorkflow{}
+	optionalInstallConfig := &agentcommon.OptionalInstallConfig{}
 	agentManifests := &manifests.AgentManifests{}
 	agentConfigAsset := &agentconfig.AgentConfig{}
 	agentHostsAsset := &agentconfig.AgentHosts{}
@@ -129,7 +135,7 @@ func (a *Ignition) Generate(ctx context.Context, dependencies asset.Parents) err
 	fencingCredentials := &agentconfig.FencingCredentials{}
 	authConfig := &gencrypto.AuthConfig{}
 	infraEnvAsset := &common.InfraEnvID{}
-	dependencies.Get(agentManifests, agentConfigAsset, agentHostsAsset, extraManifests, fencingCredentials, authConfig, agentWorkflow, infraEnvAsset)
+	dependencies.Get(optionalInstallConfig, agentManifests, agentConfigAsset, agentHostsAsset, extraManifests, fencingCredentials, authConfig, agentWorkflow, infraEnvAsset)
 	clusterInfo := &joiner.ClusterInfo{}
 
 	if err := workflowreport.GetReport(ctx).Stage(workflow.StageIgnition); err != nil {
@@ -297,6 +303,7 @@ func (a *Ignition) Generate(ctx context.Context, dependencies asset.Parents) err
 		numMasters, numArbiters, numWorkers,
 		osImage,
 		infraEnv.Spec.Proxy,
+		optionalInstallConfig.Config,
 	)
 
 	err = bootstrap.AddStorageFiles(&config, "/", "agent/files", agentTemplateData)
@@ -418,11 +425,18 @@ func addBootstrapScripts(config *igntypes.Config, releaseImage string) (err erro
 	return nil
 }
 
-// shouldDisableImagePolicy checks the OPENSHIFT_INSTALL_EXPERIMENTAL_DISABLE_IMAGE_POLICY
-// environment variable and returns true only if it's explicitly set to a boolean true value.
-// This experimental flag allows bypassing image policy validation for testing purposes.
-func shouldDisableImagePolicy() bool {
-	val, ok := os.LookupEnv("OPENSHIFT_INSTALL_EXPERIMENTAL_DISABLE_IMAGE_POLICY")
+// shouldDisableImagePolicy checks the InstallConfig imageVerificationPolicy field first,
+// then falls back to the OPENSHIFT_INSTALL_EXPERIMENTAL_DISABLE_IMAGE_POLICY environment
+// variable for backward compatibility with internal testing workflows.
+func shouldDisableImagePolicy(ic *types.InstallConfig) bool {
+	// Check install-config field first.
+	if ic != nil && ic.ImageVerificationDisabled() {
+		logrus.Info("imageVerificationPolicy is set to Disabled in install-config.yaml, will pass to assisted-service container")
+		return true
+	}
+
+	// Fall back to the experimental env var for backward compatibility.
+	val, ok := os.LookupEnv(envDisableImagePolicy)
 	if !ok {
 		return false
 	}
@@ -431,7 +445,7 @@ func shouldDisableImagePolicy() bool {
 		return false
 	}
 	if parsed {
-		logrus.Warn("OPENSHIFT_INSTALL_EXPERIMENTAL_DISABLE_IMAGE_POLICY is set to true, will pass to assisted-service container")
+		logrus.Warn(envDisableImagePolicy + " is set to true (deprecated: use imageVerificationPolicy in install-config.yaml instead), will pass to assisted-service container")
 	}
 	return parsed
 }
@@ -441,7 +455,8 @@ func getTemplateData(name, pullSecret, releaseImageList, releaseImage, releaseIm
 	haveMirrorConfig bool,
 	numMasters, numArbiters, numWorkers int,
 	osImage *models.OsImage,
-	proxy *v1beta1.Proxy) *agentTemplateData {
+	proxy *v1beta1.Proxy,
+	ic *types.InstallConfig) *agentTemplateData {
 	return &agentTemplateData{
 		ServiceProtocol:           "http",
 		PullSecret:                pullSecret,
@@ -465,7 +480,7 @@ func getTemplateData(name, pullSecret, releaseImageList, releaseImage, releaseIm
 		WatcherAuthToken:          watcherAuthToken,
 		TokenExpiry:               tokenExpiry,
 		CaBundleMount:             caBundleMount,
-		DisableImagePolicy:        shouldDisableImagePolicy(),
+		DisableImagePolicy:        shouldDisableImagePolicy(ic),
 	}
 }
 

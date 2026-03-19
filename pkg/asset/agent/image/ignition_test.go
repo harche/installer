@@ -110,7 +110,7 @@ func TestIgnition_getTemplateData(t *testing.T) {
 	agentAuthToken := "agentAuthToken"
 	userAuthToken := "userAuthToken"
 	watcherAuthToken := "watcherAuthToken"
-	templateData := getTemplateData(clusterName, pullSecret, releaseImageList, releaseImage, releaseImageMirror, publicContainerRegistries, "minimal-iso", infraEnvID, publicKey, gencrypto.AuthType, agentAuthToken, userAuthToken, watcherAuthToken, "", "", haveMirrorConfig, agentClusterInstall.Spec.ProvisionRequirements.ControlPlaneAgents, agentClusterInstall.Spec.ProvisionRequirements.ArbiterAgents, agentClusterInstall.Spec.ProvisionRequirements.WorkerAgents, osImage, proxy)
+	templateData := getTemplateData(clusterName, pullSecret, releaseImageList, releaseImage, releaseImageMirror, publicContainerRegistries, "minimal-iso", infraEnvID, publicKey, gencrypto.AuthType, agentAuthToken, userAuthToken, watcherAuthToken, "", "", haveMirrorConfig, agentClusterInstall.Spec.ProvisionRequirements.ControlPlaneAgents, agentClusterInstall.Spec.ProvisionRequirements.ArbiterAgents, agentClusterInstall.Spec.ProvisionRequirements.WorkerAgents, osImage, proxy, nil)
 	assert.Equal(t, clusterName, templateData.ClusterName)
 	assert.Equal(t, "http", templateData.ServiceProtocol)
 	assert.Equal(t, pullSecret, templateData.PullSecret)
@@ -135,13 +135,14 @@ func TestIgnition_getTemplateData(t *testing.T) {
 
 func TestIgnition_shouldDisableImagePolicy(t *testing.T) {
 	cases := []struct {
-		name     string
-		envValue string
-		envSet   bool
-		expected bool
+		name        string
+		envValue    string
+		envSet      bool
+		installConf *types.InstallConfig
+		expected    bool
 	}{
 		{
-			name:     "env-not-set",
+			name:     "env-not-set-no-config",
 			envSet:   false,
 			expected: false,
 		},
@@ -193,6 +194,31 @@ func TestIgnition_shouldDisableImagePolicy(t *testing.T) {
 			envSet:   true,
 			expected: false,
 		},
+		{
+			name:        "install-config-disabled",
+			envSet:      false,
+			installConf: &types.InstallConfig{ImageVerificationPolicy: types.ImageVerificationPolicyDisabled},
+			expected:    true,
+		},
+		{
+			name:        "install-config-enabled",
+			envSet:      false,
+			installConf: &types.InstallConfig{ImageVerificationPolicy: types.ImageVerificationPolicyEnabled},
+			expected:    false,
+		},
+		{
+			name:        "install-config-default",
+			envSet:      false,
+			installConf: &types.InstallConfig{},
+			expected:    false,
+		},
+		{
+			name:        "install-config-disabled-overrides-env-false",
+			envValue:    "false",
+			envSet:      true,
+			installConf: &types.InstallConfig{ImageVerificationPolicy: types.ImageVerificationPolicyDisabled},
+			expected:    true,
+		},
 	}
 
 	for _, tc := range cases {
@@ -214,7 +240,7 @@ func TestIgnition_shouldDisableImagePolicy(t *testing.T) {
 				os.Unsetenv("OPENSHIFT_INSTALL_EXPERIMENTAL_DISABLE_IMAGE_POLICY")
 			}
 
-			result := shouldDisableImagePolicy()
+			result := shouldDisableImagePolicy(tc.installConf)
 			assert.Equal(t, tc.expected, result)
 		})
 	}
